@@ -194,15 +194,9 @@ def main():
             optimizer.step()
             
             train_loss += loss.item()
-            
-            # [수정] 메모리 누수 방지 (.item())
-            with torch.no_grad():
-                diff = torch.abs(preds - by)
-                metric = 0.1 * diff + diff / (by + 1)
-                custom_metric += metric.mean().item()
 
         if epoch % 5 == 0:
-            print(f"Epoch [{epoch:03d}/{args.epochs}] Loss: {train_loss/len(train_loader):.4f} | Custom: {custom_metric/len(train_loader):.4f}")
+            print(f"Epoch [{epoch:03d}/{args.epochs}] Loss: {train_loss/len(train_loader):.4f}")
 
     # 7. 평가 및 저장
     print("\n🔍 최종 평가...")
