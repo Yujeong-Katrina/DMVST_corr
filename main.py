@@ -29,7 +29,7 @@ def evaluate_and_visualize(real_targets, real_preds, node_idxes, save_name="pred
 
     mae = np.mean(np.abs(ts_actual - ts_pred))
 
-    plt.figure(figsize=(15, 5))
+    plt.figure(figsize=(20, 6))
     plt.plot(ts_actual, label='Actual', color='black', alpha=0.7)
     plt.plot(ts_pred, label='Predicted', color='red', linestyle='--', alpha=0.9)
     
@@ -75,7 +75,7 @@ def get_extended_context(demand_data, time_strs, num_nodes):
     is_weekend = (dates.weekday >= 5).astype(float)
     kr_holidays = [
         '2024-10-01', '2024-10-03', '2024-10-09', '2024-12-25',
-        '2025-01-01', '2025-01-26', '2025-01-28', '2025-01-29', '2025-01-30', 
+        '2025-01-01', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', 
         '2025-03-01', '2025-03-03' 
     ]
     is_holiday = dates.strftime('%Y-%m-%d').isin(kr_holidays).astype(float)
@@ -112,10 +112,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", type=str, default="gwn_data1.json")
     parser.add_argument("--vec_path", type=str, default="vec_all_norm.txt")
-    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--window", type=int, default=24)
+    parser.add_argument("--epochs", type=int, default=50)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -157,11 +157,16 @@ def main():
     # 5. 모델 초기화
     try:
         print(f"📥 임베딩 로드: {args.vec_path}")
-        embed_vecs = np.loadtxt(args.vec_path, dtype=np.float32)
-        embed_vecs = torch.tensor(embed_vecs)
+        embed_vecs = np.loadtxt(args.vec_path, skiprows=1)
+        embed_vecs = embed_vecs[:, 1:]  # node_id 제거
+        embed_vecs = torch.tensor(embed_vecs, dtype=torch.float32)
+
     except:
         print("⚠️ 임베딩 파일 에러 -> 랜덤 초기화")
         embed_vecs = torch.randn(num_nodes_data, 128)
+
+    print(embed_vecs.shape)
+    print("num_nodes_data =", num_nodes_data)
 
     model = DMVSTNet(
         pretrained_embeddings=embed_vecs,
@@ -175,21 +180,24 @@ def main():
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    criterion = nn.MSELoss()
+    
 
     # 6. 학습 루프
     print("\n🏋️ 학습 시작!")
     for epoch in range(1, args.epochs + 1):
         model.train()
         train_loss = 0.0
-        custom_metric = 0.0
         
         for bx, bc, by in train_loader:
             bx, bc, by = bx.to(device), bc.to(device), by.to(device)
             
             optimizer.zero_grad()
             preds = model(bx, bc) 
-            loss = criterion(preds, by)
+
+            mid_loss = abs(preds.flatten() - by.flatten())
+            loss_tensor = 0.1 * mid_loss + mid_loss / (by.flatten() + 1)
+            loss = loss_tensor.mean()
+
             loss.backward()
             optimizer.step()
             
@@ -214,24 +222,22 @@ def main():
     targets_arr = np.concatenate(targets_list)
     preds_arr = np.maximum(preds_arr, 0)
     
-    rmse = np.sqrt(mean_squared_error(targets_arr, preds_arr))
     mae = mean_absolute_error(targets_arr, preds_arr)
     
     mid_loss = np.abs(preds_arr.flatten() - targets_arr.flatten())
-    loss_tensor = 0.1 * mid_loss + mid_loss / (targets_arr.flatten() + 1)
-    recommended_loss1 = loss_tensor.mean()
+    loss_tensor =  mid_loss / (targets_arr.flatten() + 1)
+    result = loss_tensor.mean()
     
     print("="*40)
-    print(f"✅ Final RMSE: {rmse:.4f}")
     print(f"✅ Final MAE : {mae:.4f}")
-    print(f"Recommended Loss : {recommended_loss1:.4f}")
+    print(f"Recommended Loss : {result:.4f}")
     print("="*40)
     
     torch.save(model.state_dict(), "dmvst_final.pth")
     
     # 8. 그래프 그리기 (예시 노드)
     # 인덱스 범위 내의 값들로 확인 (예: 100번 노드, 200번 노드 등)
-    evaluate_and_visualize(targets_arr, preds_arr, [0, 50, 100], "result_graph.png")
+    evaluate_and_visualize(targets_arr, preds_arr, [52], "result_graph.png")
 
 if __name__ == "__main__":
     main()
